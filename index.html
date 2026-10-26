@@ -1,17 +1,37 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no"><title>Dual-Lane Shift | Neon Rush V19 • Mobile Performance</title>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no"><title>Dual-Lane Shift | Neon Rush V20 • iPhone Audio Test</title>
 <style>body{margin:0;background:#080519;color:#eaf4ff;font:16px system-ui;display:grid;place-items:center;min-height:100dvh}main{text-align:center;padding:10px}h2{margin:5px 0 10px;letter-spacing:.11em}canvas{width:min(92vw,380px,calc(78dvh * 380 / 620));height:auto;aspect-ratio:380/620;background:#110b30;border:2px solid #bd6dff;border-radius:16px;touch-action:none;display:block;margin:auto}button{border:1px solid #bd6dff;background:#24144b;color:#eaf4ff;border-radius:10px;padding:9px 13px;font-weight:700;cursor:pointer;touch-action:manipulation}button:focus-visible{outline:2px solid #8fffe8;outline-offset:3px}.controls{display:flex;justify-content:center;gap:10px;margin-top:10px}p{font-size:13px;color:#b8c9e6;margin:10px 0}</style></head>
-<body><main><h2>✦ DUAL-LANE SHIFT ✦</h2><canvas id="c" width="380" height="620"></canvas><div class="audio-note">Audio temporarily disabled for smooth iPhone gameplay</div><p>Tap / Space to switch lanes • Shield recharges between uses • Precision dodges earn +2</p></main>
+<body><main><h2>✦ DUAL-LANE SHIFT ✦</h2><canvas id="c" width="380" height="620"></canvas><div class="controls"><button id="sfxToggle" type="button">SFX: OFF</button><button id="musicToggle" type="button">MUSIC: OFF</button></div><p id="audioStatus" aria-live="polite">Audio off. Tap a button to enable.</p><p>Tap / Space to switch lanes • Shield recharges between uses • Precision dodges earn +2</p></main>
 <script>
 const c=document.getElementById('c'),x=c.getContext('2d');
 let lane=0,obs=[],score=0,best=0,alive=false,shield=0,shieldCooldown=0,last=0,spawn=0,elapsed=0,particles=[],flash=0,accumulator=0;
 const STEP=1/60;
-// Mobile stability build: disable audio processing completely.
-// Audio will return after an iPhone performance-tested soundtrack is available.
-function ensureAudio(){return false}
-function syncMusic(){}
-function updateAudioStatus(){}
-function sound(kind){}
+// Pre-rendered WAV assets. No synthesis, decoding, or audio graph work in the animation loop.
+const audioStatus=document.getElementById('audioStatus');
+const musicToggle=document.getElementById('musicToggle'),sfxToggle=document.getElementById('sfxToggle');
+const musicTrack=new Audio('neon-loop.wav');musicTrack.loop=true;musicTrack.preload='none';musicTrack.volume=.28;
+const clips={};for(const k of ['switch','near','stage','hit','best']){const a=new Audio(k+'.wav');a.preload='none';a.volume=k==='switch'?.24:.48;clips[k]=a}
+let musicEnabled=false,sfxEnabled=false,unlocked=false,lastSwitchSound=0;
+function status(msg){audioStatus.textContent=msg}
+function ensureAudio(){unlocked=true;return true}
+function syncMusic(){
+ if(!musicEnabled||document.hidden){musicTrack.pause();return}
+ // Only invoked on user actions, visibility changes and game starts, never per frame.
+ const p=musicTrack.play();if(p&&p.catch)p.catch(()=>status('Music blocked. Tap MUSIC: OFF, then MUSIC: ON again.'));
+}
+function updateAudioStatus(){status('SFX '+(sfxEnabled?'on':'off')+' • Music '+(musicEnabled?'on':'off'))}
+function sound(kind){
+ if(!sfxEnabled||!unlocked||document.hidden)return;
+ if(kind==='score'||kind==='start')return;
+ if(kind==='switch'){const now=performance.now();if(now-lastSwitchSound<85)return;lastSwitchSound=now}
+ const a=clips[kind];if(!a)return;
+ try{a.pause();a.currentTime=0;const p=a.play();if(p&&p.catch)p.catch(()=>{});}catch{}
+}
+function refreshButtons(){sfxToggle.textContent='SFX: '+(sfxEnabled?'ON':'OFF');musicToggle.textContent='MUSIC: '+(musicEnabled?'ON':'OFF');updateAudioStatus()}
+sfxToggle.addEventListener('pointerdown',()=>{ensureAudio()},{passive:true});
+musicToggle.addEventListener('pointerdown',()=>{ensureAudio()},{passive:true});
+sfxToggle.addEventListener('click',()=>{ensureAudio();sfxEnabled=!sfxEnabled;refreshButtons();if(sfxEnabled)sound('switch')});
+musicToggle.addEventListener('click',()=>{ensureAudio();musicEnabled=!musicEnabled;refreshButtons();syncMusic()});
 let displayElapsed=0, colorFlash=0, stageIndex=0, hazardFlash=0;
 let rewardPulse=0,nearMissFlash=0,newBestFlash=0,newBestAchieved=false,runStartingBest=0,lastSwitchTime=-100,lastDepartureLane=-1,nearMissCandidate=null;
 const STAGES=[
