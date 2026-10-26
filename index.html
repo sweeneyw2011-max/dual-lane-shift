@@ -1,17 +1,18 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no"><title>Dual-Lane Shift | Neon Rush V20 • iPhone Audio Test</title>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no"><title>Dual-Lane Shift | Neon Rush V21 • iPhone Stability</title>
 <style>body{margin:0;background:#080519;color:#eaf4ff;font:16px system-ui;display:grid;place-items:center;min-height:100dvh}main{text-align:center;padding:10px}h2{margin:5px 0 10px;letter-spacing:.11em}canvas{width:min(92vw,380px,calc(78dvh * 380 / 620));height:auto;aspect-ratio:380/620;background:#110b30;border:2px solid #bd6dff;border-radius:16px;touch-action:none;display:block;margin:auto}button{border:1px solid #bd6dff;background:#24144b;color:#eaf4ff;border-radius:10px;padding:9px 13px;font-weight:700;cursor:pointer;touch-action:manipulation}button:focus-visible{outline:2px solid #8fffe8;outline-offset:3px}.controls{display:flex;justify-content:center;gap:10px;margin-top:10px}p{font-size:13px;color:#b8c9e6;margin:10px 0}</style></head>
-<body><main><h2>✦ DUAL-LANE SHIFT ✦</h2><canvas id="c" width="380" height="620"></canvas><div class="controls"><button id="sfxToggle" type="button">SFX: OFF</button><button id="musicToggle" type="button">MUSIC: OFF</button></div><p id="audioStatus" aria-live="polite">Audio off. Tap a button to enable.</p><p>Tap / Space to switch lanes • Shield recharges between uses • Precision dodges earn +2</p></main>
+<body><main><h2>✦ DUAL-LANE SHIFT ✦</h2><canvas id="c" width="380" height="620"></canvas><div class="controls"><button id="sfxToggle" type="button">SFX: OFF</button><button id="musicToggle" type="button">MUSIC: OFF</button></div><p id="audioStatus" aria-live="polite">Audio off • lane switches are silent for iPhone performance.</p><p>Tap / Space to switch lanes • Shield recharges between uses • Precision dodges earn +2</p></main>
 <script>
 const c=document.getElementById('c'),x=c.getContext('2d');
 let lane=0,obs=[],score=0,best=0,alive=false,shield=0,shieldCooldown=0,last=0,spawn=0,elapsed=0,particles=[],flash=0,accumulator=0;
 const STEP=1/60;
-// Pre-rendered WAV assets. No synthesis, decoding, or audio graph work in the animation loop.
+// iPhone stability: no audio playback, seeks, or audio state changes in the tap handler.
+// Pre-rendered WAV assets. Music is optional; rare event sounds only.
 const audioStatus=document.getElementById('audioStatus');
 const musicToggle=document.getElementById('musicToggle'),sfxToggle=document.getElementById('sfxToggle');
 const musicTrack=new Audio('neon-loop.wav');musicTrack.loop=true;musicTrack.preload='none';musicTrack.volume=.28;
-const clips={};for(const k of ['switch','near','stage','hit','best']){const a=new Audio(k+'.wav');a.preload='none';a.volume=k==='switch'?.24:.48;clips[k]=a}
-let musicEnabled=false,sfxEnabled=false,unlocked=false,lastSwitchSound=0;
+const clips={};for(const k of ['near','stage','hit','best']){const a=new Audio(k+'.wav');a.preload='none';a.volume=.38;clips[k]=a}
+let musicEnabled=false,sfxEnabled=false,unlocked=false;
 function status(msg){audioStatus.textContent=msg}
 function ensureAudio(){unlocked=true;return true}
 function syncMusic(){
@@ -22,15 +23,15 @@ function syncMusic(){
 function updateAudioStatus(){status('SFX '+(sfxEnabled?'on':'off')+' • Music '+(musicEnabled?'on':'off'))}
 function sound(kind){
  if(!sfxEnabled||!unlocked||document.hidden)return;
- if(kind==='score'||kind==='start')return;
- if(kind==='switch'){const now=performance.now();if(now-lastSwitchSound<85)return;lastSwitchSound=now}
+ // Never start/restart an audio file on lane switches: iOS can stall during rapid taps.
+ if(kind==='score'||kind==='start'||kind==='switch')return;
  const a=clips[kind];if(!a)return;
- try{a.pause();a.currentTime=0;const p=a.play();if(p&&p.catch)p.catch(()=>{});}catch{}
+ try{if(!a.paused)return;const p=a.play();if(p&&p.catch)p.catch(()=>{});}catch{}
 }
 function refreshButtons(){sfxToggle.textContent='SFX: '+(sfxEnabled?'ON':'OFF');musicToggle.textContent='MUSIC: '+(musicEnabled?'ON':'OFF');updateAudioStatus()}
 sfxToggle.addEventListener('pointerdown',()=>{ensureAudio()},{passive:true});
 musicToggle.addEventListener('pointerdown',()=>{ensureAudio()},{passive:true});
-sfxToggle.addEventListener('click',()=>{ensureAudio();sfxEnabled=!sfxEnabled;refreshButtons();if(sfxEnabled)sound('switch')});
+sfxToggle.addEventListener('click',()=>{ensureAudio();sfxEnabled=!sfxEnabled;refreshButtons();if(sfxEnabled)status('SFX on • event sounds only (no tap sound)')});
 musicToggle.addEventListener('click',()=>{ensureAudio();musicEnabled=!musicEnabled;refreshButtons();syncMusic()});
 let displayElapsed=0, colorFlash=0, stageIndex=0, hazardFlash=0;
 let rewardPulse=0,nearMissFlash=0,newBestFlash=0,newBestAchieved=false,runStartingBest=0,lastSwitchTime=-100,lastDepartureLane=-1,nearMissCandidate=null;
@@ -58,7 +59,7 @@ let cachedTrailKey=-1,cachedTrail=null,cachedAuraKey=-1,cachedAura=null;
 const bgCanvas=document.createElement('canvas');bgCanvas.width=380;bgCanvas.height=620;const bgx=bgCanvas.getContext('2d');
 try{best=Number(localStorage.getItem('dlsBest'))||0}catch{}
 const lanes=[125,255],playerY=510,TAU=Math.PI*2;
-function reset(){lane=0;obs=[];particles=[];score=0;shield=0;shieldCooldown=0;spawn=.6;elapsed=0;flash=0;alive=true;accumulator=0;displayElapsed=0;stageIndex=0;colorFlash=0;hazardFlash=0;cachedTrailKey=-1;cachedAuraKey=-1;rewardPulse=0;nearMissFlash=0;newBestFlash=0;newBestAchieved=false;runStartingBest=best;lastSwitchTime=-100;lastDepartureLane=-1;nearMissCandidate=null;last=performance.now();ensureAudio();syncMusic();sound('start')}
+function reset(){lane=0;obs=[];particles=[];score=0;shield=0;shieldCooldown=0;spawn=.6;elapsed=0;flash=0;alive=true;accumulator=0;displayElapsed=0;stageIndex=0;colorFlash=0;hazardFlash=0;cachedTrailKey=-1;cachedAuraKey=-1;rewardPulse=0;nearMissFlash=0;newBestFlash=0;newBestAchieved=false;runStartingBest=best;lastSwitchTime=-100;lastDepartureLane=-1;nearMissCandidate=null;last=performance.now()}
 function tap(){
  if(!alive){reset();return}
  const departing=lane;
@@ -69,10 +70,10 @@ function tap(){
    collisionY-o.y>=10&&collisionY-o.y<=38);
  nearMissCandidate=imminent.length?imminent.reduce((a,b)=>a.y>b.y?a:b):null;
  lastDepartureLane=departing;lastSwitchTime=elapsed;
- lane=1-lane;if(shieldCooldown<=0){shield=.19;shieldCooldown=1.5;}sound('switch');burst(lanes[lane],playerY,'#76fff2',12)
+ lane=1-lane;if(shieldCooldown<=0){shield=.19;shieldCooldown=1.5;}burst(lanes[lane],playerY,'#76fff2',12)
 }
-c.addEventListener('pointerdown',e=>{if(e.pointerType==='mouse'&&e.button!==0)return;e.preventDefault();ensureAudio();tap()});
-addEventListener('keydown',e=>{if(['Space','ArrowLeft','ArrowRight'].includes(e.code)){e.preventDefault();if(!e.repeat){ensureAudio();tap()}}});
+c.addEventListener('pointerdown',e=>{if(e.pointerType==='mouse'&&e.button!==0)return;e.preventDefault();tap()});
+addEventListener('keydown',e=>{if(['Space','ArrowLeft','ArrowRight'].includes(e.code)){e.preventDefault();if(!e.repeat){tap()}}});
 function burst(px,py,color,count){for(let i=0;i<count;i++){const a=Math.random()*TAU,s=40+Math.random()*135;particles.push({x:px,y:py,vx:Math.cos(a)*s,vy:Math.sin(a)*s,life:.3+Math.random()*.3,color})}}
 function speed(){return Math.min(1020,215+elapsed*19+score*3.5)}
 function interval(){return Math.max(.32,.96-elapsed*.016-score*.005)}
@@ -181,6 +182,6 @@ function frame(t){
   x.fillText('Tap to start • Dodge the hazards',190,467);
  }
  requestAnimationFrame(frame)}
-document.addEventListener('visibilitychange',()=>{last=performance.now();accumulator=0;if(document.hidden){syncMusic()}else{updateAudioStatus();syncMusic()}});
+document.addEventListener('visibilitychange',()=>{last=performance.now();accumulator=0;if(document.hidden){musicTrack.pause()}else{updateAudioStatus()}});
 requestAnimationFrame(frame);
 </script></body></html>
