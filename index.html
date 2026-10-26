@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no"><title>Dual-Lane Shift | Neon Rush V19 • Mobile Performance</title>
+<style>body{margin:0;background:#080519;color:#eaf4ff;font:16px system-ui;display:grid;place-items:center;min-height:100dvh}main{text-align:center;padding:10px}h2{margin:5px 0 10px;letter-spacing:.11em}canvas{width:min(92vw,380px,calc(78dvh * 380 / 620));height:auto;aspect-ratio:380/620;background:#110b30;border:2px solid #bd6dff;border-radius:16px;touch-action:none;display:block;margin:auto}button{border:1px solid #bd6dff;background:#24144b;color:#eaf4ff;border-radius:10px;padding:9px 13px;font-weight:700;cursor:pointer;touch-action:manipulation}button:focus-visible{outline:2px solid #8fffe8;outline-offset:3px}.controls{display:flex;justify-content:center;gap:10px;margin-top:10px}p{font-size:13px;color:#b8c9e6;margin:10px 0}</style></head>
+<body><main><h2>✦ DUAL-LANE SHIFT ✦</h2><canvas id="c" width="380" height="620"></canvas><div class="audio-note">Audio temporarily disabled for smooth iPhone gameplay</div><p>Tap / Space to switch lanes • Shield recharges between uses • Precision dodges earn +2</p></main>
+<script>
+const c=document.getElementById('c'),x=c.getContext('2d');
+let lane=0,obs=[],score=0,best=0,alive=false,shield=0,shieldCooldown=0,last=0,spawn=0,elapsed=0,particles=[],flash=0,accumulator=0;
+const STEP=1/60;
+// Mobile stability build: disable audio processing completely.
+// Audio will return after an iPhone performance-tested soundtrack is available.
+function ensureAudio(){return false}
+function syncMusic(){}
+function updateAudioStatus(){}
+function sound(kind){}
+let displayElapsed=0, colorFlash=0, stageIndex=0, hazardFlash=0;
+let rewardPulse=0,nearMissFlash=0,newBestFlash=0,newBestAchieved=false,runStartingBest=0,lastSwitchTime=-100,lastDepartureLane=-1,nearMissCandidate=null;
+const STAGES=[
+ {at:0,name:'CYAN',main:'#42eaff',light:'#b8ffff',deep:'#17316f',ring:'#65faff',accent:'#ff7bed',trail:'#37cfff',aura:'#38bff9'},
+ {at:10,name:'VIOLET',main:'#ad6aff',light:'#f1ceff',deep:'#432071',ring:'#d19aff',accent:'#69eaff',trail:'#a855ff',aura:'#a16aff'},
+ {at:25,name:'GOLD',main:'#ffbc47',light:'#fff3a7',deep:'#754117',ring:'#ffe477',accent:'#ff72ad',trail:'#ff9e32',aura:'#ffb638'},
+ {at:45,name:'EMERALD',main:'#4cffac',light:'#c8ffe7',deep:'#17634c',ring:'#7affcf',accent:'#78b9ff',trail:'#27e88f',aura:'#32efb0'},
+ {at:70,name:'PRISM',main:'#ff6fe9',light:'#ffffff',deep:'#4d2280',ring:'#ff85e8',accent:'#75faff',trail:'#d57aff',aura:'#df75ff'}
+];
+// Independent obstacle palettes unlock at the same score milestones as the orb.
+// All hazards use ONE solid stage color; no alternating variant colors.
+// Spawn spacing prevents overlapping hazards in the same lane.
+const HAZARD_STAGES=[
+ {name:'SOLAR',main:'#ff9e38',edge:'#ffe0a1',core:'#70245a',trail:'#ff9d54'},
+ {name:'PLASMA',main:'#ff5eeb',edge:'#ffdbff',core:'#4a1c88',trail:'#c36aff'},
+ {name:'VOLT',main:'#ffdf4d',edge:'#fff8b2',core:'#7d4314',trail:'#ffc34c'},
+ {name:'TOXIC',main:'#9dff45',edge:'#e8ffc0',core:'#236653',trail:'#6dff7b'},
+ {name:'HYPER',main:'#ff61ca',edge:'#ffffff',core:'#3e267c',trail:'#c58aff'}
+];
+function currentStage(){let i=0;while(i+1<STAGES.length&&score>=STAGES[i+1].at)i++;return i}
+function rgba(hex,a){const v=hex.slice(1);return `rgba(${parseInt(v.slice(0,2),16)},${parseInt(v.slice(2,4),16)},${parseInt(v.slice(4,6),16)},${a})`}
+
+let cachedTrailKey=-1,cachedTrail=null,cachedAuraKey=-1,cachedAura=null;
+const bgCanvas=document.createElement('canvas');bgCanvas.width=380;bgCanvas.height=620;const bgx=bgCanvas.getContext('2d');
+try{best=Number(localStorage.getItem('dlsBest'))||0}catch{}
+const lanes=[125,255],playerY=510,TAU=Math.PI*2;
+function reset(){lane=0;obs=[];particles=[];score=0;shield=0;shieldCooldown=0;spawn=.6;elapsed=0;flash=0;alive=true;accumulator=0;displayElapsed=0;stageIndex=0;colorFlash=0;hazardFlash=0;cachedTrailKey=-1;cachedAuraKey=-1;rewardPulse=0;nearMissFlash=0;newBestFlash=0;newBestAchieved=false;runStartingBest=best;lastSwitchTime=-100;lastDepartureLane=-1;nearMissCandidate=null;last=performance.now();ensureAudio();syncMusic();sound('start')}
+function tap(){
+ if(!alive){reset();return}
+ const departing=lane;
+ // Qualify ONLY if a hazard in the lane being left is about to cross the
+ // collision line. A switch made far in advance is an ordinary dodge.
+ const collisionY=playerY-8;
+ const imminent=obs.filter(o=>!o.passed&&o.lane===departing&&
+   collisionY-o.y>=10&&collisionY-o.y<=38);
+ nearMissCandidate=imminent.length?imminent.reduce((a,b)=>a.y>b.y?a:b):null;
+ lastDepartureLane=departing;lastSwitchTime=elapsed;
+ lane=1-lane;if(shieldCooldown<=0){shield=.19;shieldCooldown=1.5;}sound('switch');burst(lanes[lane],playerY,'#76fff2',12)
+}
+c.addEventListener('pointerdown',e=>{if(e.pointerType==='mouse'&&e.button!==0)return;e.preventDefault();ensureAudio();tap()});
+addEventListener('keydown',e=>{if(['Space','ArrowLeft','ArrowRight'].includes(e.code)){e.preventDefault();if(!e.repeat){ensureAudio();tap()}}});
+function burst(px,py,color,count){for(let i=0;i<count;i++){const a=Math.random()*TAU,s=40+Math.random()*135;particles.push({x:px,y:py,vx:Math.cos(a)*s,vy:Math.sin(a)*s,life:.3+Math.random()*.3,color})}}
+function speed(){return Math.min(1020,215+elapsed*19+score*3.5)}
+function interval(){return Math.max(.32,.96-elapsed*.016-score*.005)}
+function star(cx,cy,r,rotation,palette){const color=palette.main;x.save();x.translate(cx,cy);x.rotate(rotation);x.shadowColor=color;x.shadowBlur=0;x.beginPath();for(let i=0;i<16;i++){const a=i*Math.PI/8,rad=i%2?r*.68:r;x.lineTo(Math.cos(a)*rad,Math.sin(a)*rad)}x.closePath();x.fillStyle=color;x.fill();x.shadowBlur=0;x.strokeStyle=palette.edge;x.lineWidth=2;x.stroke();x.beginPath();x.arc(0,0,r*.36,0,TAU);x.fillStyle=palette.core;x.fill();x.beginPath();x.arc(-r*.1,-r*.1,3,0,TAU);x.fillStyle=palette.edge;x.fill();x.restore()}
+function renderBackground(){
+ const bg=bgx.createLinearGradient(0,0,380,620);bg.addColorStop(0,'#10082d');bg.addColorStop(.55,'#20104b');bg.addColorStop(1,'#0b1233');bgx.fillStyle=bg;bgx.fillRect(0,0,380,620);
+ // Neon sunset and floating synthwave shapes: all vector-drawn, no borrowed assets.
+ bgx.save();bgx.globalAlpha=.23;const halo=bgx.createRadialGradient(190,130,10,190,130,180);halo.addColorStop(0,'#ff6acb');halo.addColorStop(1,'#ff6acb00');bgx.fillStyle=halo;bgx.fillRect(0,0,380,370);bgx.restore();
+ bgx.save();bgx.globalAlpha=.65;bgx.fillStyle='#ff87cc';bgx.beginPath();bgx.arc(190,122,50,0,TAU);bgx.fill();bgx.fillStyle='#20104b';for(let j=0;j<6;j++)bgx.fillRect(137,135+j*9,106,3+j*1.5);bgx.restore();
+ bgx.save();bgx.globalAlpha=.17;bgx.strokeStyle='#bc7dff';bgx.lineWidth=1;for(let j=0;j<9;j++){let yy=320+j*j*4.7;bgx.beginPath();bgx.moveTo(0,yy);bgx.lineTo(380,yy);bgx.stroke()}for(let j=-8;j<=8;j++){bgx.beginPath();bgx.moveTo(190,320);bgx.lineTo(190+j*50,620);bgx.stroke()}bgx.restore();
+}
+renderBackground();
+function update(dt){
+ if(alive){elapsed+=dt;shield=Math.max(0,shield-dt);shieldCooldown=Math.max(0,shieldCooldown-dt);spawn-=dt;
+ if(spawn<=0){
+  // Keep at least 84 pixels between hazards in the same lane, even as speed rises.
+  const available=[0,1].filter(candidate=>!obs.some(o=>o.lane===candidate && o.y<44 && o.y>-130));
+  if(available.length){
+    const nextLane=available[Math.floor(Math.random()*available.length)];
+    const angle=Math.random()*TAU;
+    obs.push({lane:nextLane,y:-45,prevY:-45,angle,prevAngle:angle,passed:false,r:25});
+    spawn+=interval();if(spawn<=0)spawn=interval();
+  }else{spawn=.06;}
+ }
+ const velocity=speed();
+ for(const o of obs){const oldY=o.y;o.prevY=oldY;o.prevAngle=o.angle;o.y+=velocity*dt;o.angle+=dt*(2.3+elapsed*.035);
+ // Swept crossing: fast hazards cannot skip the collision line between frames.
+ if(!o.passed&&oldY<playerY-8&&o.y>=playerY-8){o.passed=true;if(o.lane===lane&&shield<=0){alive=false;sound('hit');flash=.24;burst(lanes[lane],playerY,'#ff6fae',30);best=Math.max(best,score);try{localStorage.setItem('dlsBest',String(best))}catch{}}else{
+  score++;sound('score');
+  // A near miss rewards a last-second lane switch away from an approaching hazard.
+  // Only one bonus per hazard, awarded as it crosses the player.
+  const nearMiss=o===nearMissCandidate && o.lane===lastDepartureLane && o.lane!==lane && elapsed-lastSwitchTime<=.20;
+  if(o===nearMissCandidate)nearMissCandidate=null;
+  if(nearMiss){sound('near');score+=2;nearMissFlash=1.05;rewardPulse=Math.max(rewardPulse,.30);burst(lanes[o.lane],playerY,'#fff4a0',20)}
+  else if(o.lane===lane)burst(lanes[lane],playerY,'#6fffe0',12);
+  if(!newBestAchieved && runStartingBest>0 && score>runStartingBest){newBestAchieved=true;sound('best');newBestFlash=2.0;rewardPulse=Math.max(rewardPulse,.42);burst(lanes[lane],playerY,'#fff4a0',35)}
+ }}}
+ obs=obs.filter(o=>o.y<670)}
+ const nextStage=currentStage();if(nextStage!==stageIndex){sound('stage');stageIndex=nextStage;colorFlash=1.5;hazardFlash=1.5;rewardPulse=Math.max(rewardPulse,.55);cachedTrailKey=-1;cachedAuraKey=-1;burst(lanes[lane],playerY,STAGES[stageIndex].main,26)}
+ rewardPulse=Math.max(0,rewardPulse-dt);nearMissFlash=Math.max(0,nearMissFlash-dt);newBestFlash=Math.max(0,newBestFlash-dt);colorFlash=Math.max(0,colorFlash-dt);hazardFlash=Math.max(0,hazardFlash-dt);flash=Math.max(0,flash-dt);for(const p of particles){p.x+=p.vx*dt;p.y+=p.vy*dt;p.life-=dt}particles=particles.filter(p=>p.life>0);
+}
+function frame(t){
+ // Cap huge background-tab pauses; use a fixed simulation step for smooth consistent motion.
+ const dt=Math.min(Math.max((t-last)/1000,0),.05);last=t;accumulator=Math.min(accumulator+dt,.05);
+ let steps=0;while(accumulator>=STEP&&steps<3){update(STEP);accumulator-=STEP;steps++}
+ const alpha=Math.min(1,accumulator/STEP);displayElapsed=elapsed+Math.min(alpha,1)*STEP;
+ x.drawImage(bgCanvas,0,0);
+ // Lightweight full-screen pulse at milestones, near misses, and personal bests.
+ if(rewardPulse>0){const strength=Math.min(1,rewardPulse/.55);x.fillStyle=rgba(STAGES[stageIndex].main,.085*strength);x.fillRect(0,0,380,620);x.strokeStyle=rgba(STAGES[stageIndex].light,.75*strength);x.lineWidth=4+4*strength;x.strokeRect(5,5,370,610)}
+ // Moving starfield and lane markers create a sense of acceleration.
+ const scroll=alive?displayElapsed*speed()*.23:0;
+ for(let i=0;i<38;i++){const sx=(i*83+37)%380,sy=((i*119+29+scroll*(.25+i%3*.2))%660)-20;x.fillStyle=i%3?'#a16ae5':'#82f9ff';x.beginPath();x.arc(sx,sy,i%5===0?1.7:.8,0,TAU);x.fill()}
+ for(let i=0;i<2;i++){const cx=lanes[i];x.strokeStyle=i===0?'#6be7f4':'#ef83ff';x.globalAlpha=.55;x.shadowColor=x.strokeStyle;x.shadowBlur=0;x.lineWidth=3;x.setLineDash([12,18]);x.lineDashOffset=-(scroll%30);x.beginPath();x.moveTo(cx,0);x.lineTo(cx,620);x.stroke();x.setLineDash([]);x.shadowBlur=0;x.globalAlpha=1}
+ for(const o of obs){const cx=lanes[o.lane],oy=o.prevY+(o.y-o.prevY)*alpha,oa=o.prevAngle+(o.angle-o.prevAngle)*alpha,h=HAZARD_STAGES[stageIndex];x.strokeStyle=rgba(h.trail,.55);x.lineWidth=5;x.beginPath();x.moveTo(cx,oy-20);x.lineTo(cx,oy-55);x.stroke();star(cx,oy,o.r,oa,h)}
+ // Energy orb: layered plasma core, rotating rings, and a speed-responsive light trail.
+ const stage=STAGES[stageIndex];const px=lanes[lane],py=playerY,boost=Math.min(1,(speed()-215)/805),pulse=1+Math.sin(elapsed*7)*.06;
+ x.save();x.globalCompositeOperation='lighter';
+ // Trail grows in BOTH length and intensity as speed increases. Draw with gradients,
+ // rather than expensive per-particle shadow blurs, to preserve smooth gameplay.
+ const trailLength=28+boost*190;
+ const trailWidth=5+boost*13;
+ const trailKey=stageIndex*100+Math.round(boost*40);
+ if(trailKey!==cachedTrailKey){
+   const b=trailKey/40;cachedTrail=x.createLinearGradient(0,16,0,28+b*190);
+   cachedTrail.addColorStop(0,rgba(stage.light,.94));
+   cachedTrail.addColorStop(.18,rgba(stage.main,0.55+b*.35));
+   cachedTrail.addColorStop(.55,rgba(stage.accent,0.10+b*.40));
+   cachedTrail.addColorStop(1,rgba(stage.accent,0));cachedTrailKey=trailKey;
+ }
+ const trail=cachedTrail;
+ x.save();x.translate(px,py);x.globalAlpha=1;x.fillStyle=trail;x.beginPath();x.moveTo(-trailWidth,12);x.quadraticCurveTo(-trailWidth*(.8+boost*.2),trailLength*.65,0,trailLength);x.quadraticCurveTo(trailWidth*(.8+boost*.2),trailLength*.65,trailWidth,12);x.closePath();x.fill();
+ // A narrow, bright inner streak makes the increase apparent even on small screens.
+ x.strokeStyle=rgba(stage.light,0.38+boost*.60);x.lineWidth=1.5+boost*3;
+ x.beginPath();x.moveTo(0,14);x.lineTo(0,trailLength*(.40+boost*.25));x.stroke();
+ // Animated sparks become more numerous with speed; no new objects are allocated.
+ const sparkCount=2+Math.floor(boost*9);
+ for(let j=0;j<sparkCount;j++){
+   const phase=(displayElapsed*(.8+boost*1.5)+j*.61803398875)%1;
+   const sy=18+phase*trailLength*.9;
+   const sx=Math.sin(j*8.7+displayElapsed*5)*(trailWidth*(.3+phase));
+   x.globalAlpha=(.3+boost*.55)*(1-phase);x.fillStyle=j%2?stage.ring:stage.accent;
+   x.beginPath();x.arc(sx,sy,1.2+boost*1.3,0,TAU);x.fill();
+ }
+ x.globalAlpha=1;const auraKey=stageIndex*100+Math.round(boost*20);
+ if(auraKey!==cachedAuraKey){cachedAura=x.createRadialGradient(0,0,2,0,0,43+auraKey/20*15);cachedAura.addColorStop(0,rgba(stage.light,.66));cachedAura.addColorStop(.4,rgba(stage.aura,.34));cachedAura.addColorStop(1,rgba(stage.aura,0));cachedAuraKey=auraKey;}
+ x.fillStyle=cachedAura;x.beginPath();x.arc(0,0,45+boost*15,0,TAU);x.fill();x.restore();x.restore();
+ x.save();x.translate(px,py);x.scale(pulse,pulse);x.shadowColor=shield>0?stage.light:stage.main;x.shadowBlur=6+boost*4;
+ const core=x.createRadialGradient(-6,-7,1,0,0,21);core.addColorStop(0,"#ffffff");core.addColorStop(.25,stage.light);core.addColorStop(.65,stage.main);core.addColorStop(1,stage.deep);x.fillStyle=core;x.beginPath();x.arc(0,0,19,0,TAU);x.fill();x.shadowBlur=0;
+ x.save();x.rotate(displayElapsed*1.65);x.strokeStyle=stage.ring;x.lineWidth=3;x.beginPath();x.arc(0,0,25,-.3,2.15);x.stroke();x.beginPath();x.arc(0,0,25,Math.PI-.3,Math.PI+2.15);x.stroke();x.restore();
+ x.save();x.rotate(-displayElapsed*1.1);x.strokeStyle=stage.accent;x.lineWidth=2;x.globalAlpha=.8;x.beginPath();x.ellipse(0,0,30,11,Math.PI/4,0,TAU);x.stroke();x.restore();
+ if(shield>0){x.strokeStyle='#a2ffe6';x.shadowColor='#80ffe6';x.shadowBlur=8;x.lineWidth=4;x.beginPath();x.arc(0,0,34,0,TAU);x.stroke()}
+ x.restore();
+ for(const p of particles){x.globalAlpha=Math.min(1,p.life*2);x.fillStyle=p.color;x.beginPath();x.arc(p.x,p.y,3,0,TAU);x.fill()}x.globalAlpha=1;if(flash>0){x.fillStyle='rgba(255,92,168,'+(flash*1.1)+')';x.fillRect(0,0,380,620)}
+ x.fillStyle='#fff';x.textAlign='left';x.font='bold 25px system-ui';x.fillText('SCORE '+score,20,38);x.font='15px system-ui';x.fillText('BEST '+Math.max(best,score),20,62);
+ if(colorFlash>0&&alive){x.save();x.globalAlpha=Math.min(1,colorFlash/.5);x.fillStyle=stage.light;x.textAlign='center';x.font='bold 21px system-ui';x.fillText('✦ '+stage.name+' ORB UNLOCKED ✦',190,156);x.fillStyle=HAZARD_STAGES[stageIndex].edge;x.font='bold 16px system-ui';x.fillText('⚡ '+HAZARD_STAGES[stageIndex].name+' HAZARDS ⚡',190,184);x.restore()}
+ if(nearMissFlash>0&&alive){x.save();x.globalAlpha=Math.min(1,nearMissFlash*2);x.textAlign='center';x.font='bold 23px system-ui';x.fillStyle='#fff3a0';x.fillText('NEAR MISS  +2 BONUS!',190,225);x.restore()}
+ if(newBestFlash>0&&alive){x.save();x.globalAlpha=Math.min(1,newBestFlash*1.5);x.textAlign='center';x.font='bold 23px system-ui';x.fillStyle='#fff4b0';x.fillText('★ NEW PERSONAL BEST! ★',190,118);x.restore()}
+ if(!alive){
+  x.fillStyle='#061025e8';x.fillRect(0,0,380,620);
+  x.textAlign='center';x.fillStyle='#aaf9ff';x.font='bold 14px system-ui';x.fillText('✦ NEON RUSH ✦',190,188);
+  x.fillStyle='#fff';x.font='bold 34px system-ui';x.fillText(score?'GAME OVER':'DUAL-LANE SHIFT',190,239);
+  if(score){x.fillStyle='#f5b3ff';x.font='bold 25px system-ui';x.fillText('SCORE  '+score,190,286);x.font='16px system-ui';x.fillText('PERSONAL BEST  '+best,190,315)}
+  else{x.fillStyle='#c6b8f5';x.font='16px system-ui';x.fillText('Dodge the spinning neon hazards.',190,284);x.fillText('Switch lanes to survive.',190,310)}
+  x.fillStyle='#25e5d0';x.fillRect(60,353,260,57);x.fillStyle='#071329';x.font='bold 20px system-ui';x.fillText(score?'TAP TO RETRY':'TAP TO START',190,389);
+  x.fillStyle='#b7c9e9';x.font='13px system-ui';x.fillText('Space / ← / → also work',190,443);
+  x.fillText('Tap to start • Dodge the hazards',190,467);
+ }
+ requestAnimationFrame(frame)}
+document.addEventListener('visibilitychange',()=>{last=performance.now();accumulator=0;if(document.hidden){syncMusic()}else{updateAudioStatus();syncMusic()}});
+requestAnimationFrame(frame);
+</script></body></html>
